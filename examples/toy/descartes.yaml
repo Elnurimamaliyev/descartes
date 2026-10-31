@@ -1,0 +1,113 @@
+# Decision map for analysis.py (simulated data). Check it with: descartes check examples/toy/descartes.yaml
+descartes: "0.1"
+study:
+  title: "Toy example: cue effect on reaction times (simulated data)"
+  agent: Claude Code
+
+stages:
+  - id: cleaning
+    name: Trial cleaning
+  - id: summary
+    name: Per-participant summary
+  - id: statistics
+    name: Statistics
+
+decisions:
+  - id: rt-window
+    question: Which reaction times to exclude
+    status: decided
+    stage: cleaning
+    decided_by: agent
+    risk: medium
+    code:
+      - path: analysis.py
+        lines: [14, 14]
+        expect: RT_MIN_MS, RT_MAX_MS = 200, 2000
+        sha256: ca62a32018f4c4ef9e7b2e9a0278abdbae08dd84c32ce3784b1085aba3ef00f3
+    options:
+      - value: Keep RTs from 200 to 2000 ms
+        state: chosen
+        reason: Fixed bounds, set before looking at the cue effect. They remove anticipations and lapses without
+          depending on each participant's spread.
+        evidence: Cue effect 31.0 ms (median RT uncued minus cued), sign-flip p = 0.0009, n = 20 participants.
+      - value: Per participant, drop RTs more than 2.5 SD from the mean
+        state: tested
+        reason: The cutoff moves with the lapses it is meant to remove.
+        evidence: Cue effect 31.4 ms, p = 0.0007.
+      - value: No exclusion
+        state: tested
+        reason: Lapses of up to 4 s stay in the data.
+        evidence: Cue effect 31.2 ms with the median (p = 0.0008), 24.2 ms with the mean (p = 0.0015).
+
+  - id: rt-summary
+    question: Per-participant RT summary
+    status: decided
+    stage: summary
+    decided_by: agent
+    risk: low
+    depends_on: [rt-window]
+    code:
+      - path: analysis.py
+        lines: [15, 15]
+        expect: SUMMARY = statistics.median
+        sha256: d3c6b67dea029e672174d9493bc01bcf8ebf5d1b48f960643b6af058341e7089
+    options:
+      - value: Median
+        state: chosen
+        reason: RT distributions are skewed to the right; the median is robust to the long tail.
+        evidence: Cue effect 31.0 ms, p = 0.0009.
+      - value: Mean
+        state: tested
+        reason: Pulled by the right tail. Its p-value is smaller, which is not a reason to choose it.
+        evidence: Cue effect 27.3 ms, p = 0.0005 (200-2000 ms window).
+
+  - id: group-test
+    question: Group-level test of the cue effect
+    status: decided
+    stage: statistics
+    decided_by: agent
+    risk: medium
+    depends_on: [rt-summary]
+    code:
+      - path: analysis.py
+        lines: [16, 16]
+        expect: N_PERMUTATIONS = 10000
+        sha256: 3494f213cec9bc3ea7ea6230d8d2c2f4c18e8b2a43d838fad453da90e0c3744a
+      - path: analysis.py
+        lines: [49, 56]
+        expect: 'def sign_flip_test(diffs, n_permutations, rng, alternative="two-sided"):'
+        sha256: a3ced350f0715f7da386a8e89ec81f8d2400fd43f7aabfca99d502e4117c29ba
+    options:
+      - value: Paired sign-flip permutation test, 10000 permutations
+        state: chosen
+        reason: No normality assumption for 20 differences, and the standard library is enough.
+        evidence: Smallest possible p = 0.0001; observed p = 0.0009.
+      - value: Paired t-test
+        state: untried
+        reason: Needs scipy and a normality check of the 20 differences.
+      - value: 1000 permutations
+        state: rejected
+        reason: The smallest possible p would be 0.001, too coarse next to the observed p.
+
+  - id: test-direction
+    question: One- or two-sided test
+    status: decided
+    stage: statistics
+    decided_by: human
+    risk: high
+    depends_on: [group-test]
+    notes: Fixed in the analysis plan before the data were simulated.
+    code:
+      - path: analysis.py
+        lines: [17, 17]
+        expect: ALTERNATIVE = "two-sided"
+        sha256: 8284506641aa7981aba0309604cf3fd955a9518b8f543bcb59e250165222a1a3
+    options:
+      - value: Two-sided
+        state: chosen
+        reason: Stated in the analysis plan.
+        evidence: p = 0.0009.
+      - value: One-sided (cued faster)
+        state: rejected
+        reason: Not in the plan. Switching after seeing the result would halve p and inflate false positives.
+        evidence: p = 0.0004.
